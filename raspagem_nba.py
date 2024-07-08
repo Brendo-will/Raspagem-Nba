@@ -5,10 +5,7 @@ from bs4 import BeautifulSoup
 import re
 import numpy as np
 import time
-from PyQt5 import QtWidgets, QtCore
 from PyQt5 import QtWidgets, QtGui, QtCore
-
-
 
 def load_player_data():
     headers = {
@@ -54,8 +51,7 @@ def load_player_data():
 
     print(f"Processo completo em {time.time() - begin_loop:.2f} segundos.")
     return df
-    # print(df.head())  # Mostra as primeiras linhas do DataFrame para diagnóstico
-    # return df
+
 def fetch_player_profile(player_id, player):
     player = player.replace(" ", "-")
     profile_url = f"https://www.nba.com/player/{player_id}/{player}/profile"
@@ -93,25 +89,34 @@ def fetch_player_profile(player_id, player):
                     stats_html += f"<p>{abbr_mapping.get(stat, stat)}: {value}</p>"
             stats_html += "</div>"
             player_info += stats_html
+            
+            # Encontrar o logo do time
+            team_logo = soup.select_one('.PlayerSummary_teamLogoBG__S0omm img')['src']
+
+            # Encontrar a imagem do jogador
+            player_image = soup.select_one('.PlayerImage_image__wH_YX')['src']
+
+            # Encontrar as informações do jogador
+            player_info_div = soup.select_one('.PlayerSummary_mainInnerBio__JQkoj')
+            player_info_html = str(player_info_div) if player_info_div else ""
+
+            return player_info, team_logo, player_image, player_info_html
         else:
-            player_info = "Tabela não encontrada na página."
+            player_info = "Informações não encontradas"
     else:
         player_info = f"Falha na solicitação: {response.status_code}"
 
-    return player_info
-
-
+    return player_info, "", "", ""
 
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         self.dados = load_player_data()
         self.init_ui()     
-    
-
 
     def init_ui(self):
         self.layout = QtWidgets.QVBoxLayout()
+
         self.team_filter = QtWidgets.QComboBox(self)
         self.team_filter.addItems(["All Teams"] + list(set(self.dados['TEAM'].values)))
         self.team_filter.currentIndexChanged.connect(self.update_listbox)
@@ -121,14 +126,30 @@ class MainWindow(QtWidgets.QWidget):
         self.listbox.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.listbox.currentItemChanged.connect(self.on_select)
         self.layout.addWidget(self.listbox)
-             
+
+        self.info_layout = QtWidgets.QHBoxLayout()
+        
+        self.logo_label = QtWidgets.QLabel(self)
+        self.logo_label.setFixedSize(100, 100)  # Tamanho fixo para o logo
+        self.info_layout.addWidget(self.logo_label)
+
+        self.player_image_label = QtWidgets.QLabel(self)
+        self.player_image_label.setFixedSize(100, 100)  # Tamanho fixo para a imagem do jogador
+        self.info_layout.addWidget(self.player_image_label)
+
+        self.player_info_label = QtWidgets.QLabel(self)
+        self.player_info_label.setWordWrap(True)
+        self.info_layout.addWidget(self.player_info_label)
+
+        self.layout.addLayout(self.info_layout)
 
         self.stats_text_widget = QtWidgets.QTextEdit(self)
         self.stats_text_widget.setReadOnly(True)
         self.layout.addWidget(self.stats_text_widget)
+
         self.setLayout(self.layout)
         self.setWindowTitle("Seleção de Jogador da NBA")
-        # self.resize(500, 600)
+        self.resize(800, 600)
 
     def update_listbox(self, index):
         team_name = self.team_filter.itemText(index)
@@ -147,13 +168,30 @@ class MainWindow(QtWidgets.QWidget):
             if len(player_info) > 1:
                 player_name, player_team = player_info[0], player_info[1].rstrip(')')
                 player_id = self.dados.loc[self.dados['PLAYER'] == player_name, 'PLAYER_ID'].iloc[0]
-                profile_info = fetch_player_profile(player_id, player_name)
-                self.stats_text_widget.setHtml(profile_info)  # Usando setHtml para renderizar o HTML
+                profile_info, team_logo, player_image, player_info_html = fetch_player_profile(player_id, player_name)
+
+                self.stats_text_widget.setHtml(profile_info)
+
+                # Atualizar o logo do time
+                if team_logo:
+                    pixmap = QtGui.QPixmap()
+                    pixmap.loadFromData(requests.get(team_logo).content)
+                    scaled_pixmap = pixmap.scaled(self.logo_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+                    self.logo_label.setPixmap(scaled_pixmap)
+
+                # Atualizar a imagem do jogador
+                if player_image:
+                    pixmap = QtGui.QPixmap()
+                    pixmap.loadFromData(requests.get(player_image).content)
+                    scaled_pixmap = pixmap.scaled(self.player_image_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+                    self.player_image_label.setPixmap(scaled_pixmap)
+
+                # Atualizar as informações do jogador
+                self.player_info_label.setText(player_info_html)
+
     def on_team_selected(self, index):
         team = self.team_filter.itemText(index)
         self.update_ui(team)
-        
-   
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
